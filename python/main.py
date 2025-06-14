@@ -3,8 +3,12 @@ import re
 from tkinter import *
 from tkinter import messagebox, ttk
 
+import jpg
 import wlbi
 from PIL import Image
+
+wlbi_filepath = ""
+# 待补充没勾选wlbi时
 
 
 # 读取文件并获取头部信息和芯片地图数据
@@ -31,7 +35,7 @@ def read_file(file_path, file_type="default"):
     map_data = []
     for line in lines[start_line:]:
         stripped_line = line.strip()
-        if stripped_line:  # 跳过空行
+        if stripped_line:
             map_data.append(stripped_line)
 
     return header, map_data
@@ -87,7 +91,7 @@ def overlay_maps(maps, order, debug=False):
                     if map_data[0][j] == "." and (
                         map_data[0][j + 1] == "S" or map_data[0][j + 1] == "*"
                     ):
-                        current_map_start = j + 2  # 从.S或.*后的第一个字符开始
+                        current_map_start = j + 2
                         break
 
             # 计算偏移量
@@ -235,17 +239,25 @@ def calculate_stats(map_data):
 
 # 生成HEX格式
 def generate_hex(map_data):
-    hex_str = ""
-    for line in map_data:
-        binary_str = "".join(
-            "1" if char != "." and char != " " else "0" for char in line
-        )
-        # 补齐到8的倍数
-        while len(binary_str) % 8 != 0:
-            binary_str += "0"
-        hex_part = hex(int(binary_str, 2))[2:]
-        hex_str += hex_part
-    return hex_str
+    hex_lines = []
+    digit_count = {}
+    for row in map_data:
+        processed_row = []
+        for char in row:
+            if char == "." or char == "S":
+                processed_row.append("__ ")
+            elif char.isdigit():
+                processed_row.append(f"0{char} ")
+                digit_count[char] = digit_count.get(char, 0) + 1
+            else:
+                processed_row.append(f"*{char} ")
+        hex_lines.append(f"Rowdata: {''.join(processed_row)}")
+
+    stats_lines = ["\n# 数字统计:"]
+    for digit, count in sorted(digit_count.items(), key=lambda x: int(x[0])):
+        stats_lines.append(f"0{digit}: {count} ")
+
+    return "\n".join(hex_lines + stats_lines)
 
 
 # 生成jpg格式
@@ -311,11 +323,14 @@ def process_mapping():
                         f"B003332-{wafer_id}_20250325_170454.WaferMap"  # 假设文件名格式
                     )
                     file_path = os.path.join(folder_path, file_name)
+                    wlbi_filepath = file_path
                     map_data = wlbi.parse_wlbi_to_matrix(file_path)  # 调用函数获取列表
                     map_data = [
                         "".join(row) for row in map_data
                     ]  # 将二维列表转换为一维字符串列表
-                    print(map_data)
+                    for row in map_data:
+                        print(row)
+
                 else:
                     file_name = (
                         f"S1M032120B_B003332_{wafer_id}.txt"
@@ -343,6 +358,7 @@ def process_mapping():
                     print(f"警告: 文件 {file_path} 不存在")
 
         # 叠图
+
         if not maps:
             messagebox.showwarning("警告", f"晶圆 {wafer_id} 没有找到有效的叠图数据！")
             continue
@@ -394,6 +410,21 @@ def process_mapping():
             for row in overlayed_map:
                 file.write(f"{row}\n")
 
+        # 输出HEX格式
+        hex_data = generate_hex(overlayed_map)
+        output_hex_path = os.path.join(
+            output_formats["HEX"], f"{base_file_name}_overlayed.hex"
+        )
+        with open(output_hex_path, "w") as file:
+            file.write(hex_data)
+
+        # 输出jpg格式
+        # generate_jpg(overlayed_map, f"{base_file_name}_overlayed.jpg")
+        # jpg.generate_threejs(overlayed_map, f"{base_file_name}_overlayed.jpg")
+        jpg.generate_color_image(
+            overlayed_map, f"输出文件/jpg/{base_file_name}_overlayed_map.jpg"
+        )
+
         # 输出wafermap格式
         output_wafermap_path = os.path.join(
             output_formats["wafermap"], f"{base_file_name}_overlayed.wafermap"
@@ -415,20 +446,10 @@ def process_mapping():
             for row in overlayed_map:
                 file.write(f"{row}\n")
 
-        # 输出HEX格式
-        hex_data = generate_hex(overlayed_map)
-        output_hex_path = os.path.join(
-            output_formats["HEX"], f"{base_file_name}_overlayed.hex"
-        )
-        with open(output_hex_path, "w") as file:
-            file.write(hex_data)
-
-        # 输出jpg格式
-        generate_jpg(overlayed_map, f"{base_file_name}_overlayed.jpg")
-
-    messagebox.showinfo(
-        "完成", "叠图和输出已完成！调试信息已保存到'输出文件/debug'文件夹。"
-    )
+        wlbi.print_inform_wafermap(overlayed_map, wlbi_filepath, base_file_name)
+        # generate_wafermap(overlayed_map, wlbi_filepath)
+        # for row in overlayed_map:
+        #     print(row)
 
 
 # 打开排序对话框
@@ -496,7 +517,7 @@ def update_format_display():
 
 # 定义每个输入格式的文件夹路径
 input_formats = {
-    "衬底": "", 
+    "衬底": "",  # 这里没有衬底相关文件示例，可补充路径
     "AOI": "叠图输入文件/AOI/S1M032120B_B003332",
     "CP1": "叠图输入文件/CP1/S1M032120B_B003332_1_0",
     "CP2": "叠图输入文件/CP2/S1M032120B_B003332_1_0",
@@ -510,7 +531,6 @@ output_formats = {
     "wafermap": "输出文件/wafermap",
     "HEX": "输出文件/HEX",
     "jpg": "输出文件/jpg",
-    "WLBI": "输出文件/WLBI",
 }
 
 # 创建主窗口

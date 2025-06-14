@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>清晰颗粒地图</title>
+  <style>body { margin: 0; }</style>
+</head>
+<body>
+<script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
+<script>
+  const mapData = `-3 -18 257 0
+-2 -18 1 0
+-1 -18 1 0
+0 -18 1 0
+1 -18 1 0
+2 -18 257 0
+-5 -17 1 0
+-4 -17 1 0
+-3 -17 1 0
+-2 -17 1 0
+-1 -17 1 0
+0 -17 1 0
+1 -17 1 0
+2 -17 1 0
+3 -17 1 0
+4 -17 1 0
+-6 -16 1 0
+-5 -16 1 0
+-4 -16 1 0
+-3 -16 1 0
+-2 -16 1 0
+-1 -16 1 0
+0 -16 1 0
+1 -16 1 0
+2 -16 1 0
+3 -16 1 0
+4 -16 1 0
+5 -16 1 0
+-8 -15 4 0
+-7 -15 1 0
+-6 -15 1 0
+-5 -15 1 0
+-4 -15 1 0
+-3 -15 1 0
+-2 -15 1 0
+-1 -15 1 0
+0 -15 1 0
+1 -15 1 0
+2 -15 1 0
+3 -15 1 0
+4 -15 1 0
+5 -15 1 0
+6 -15 1 0
+7 -15 1 0
+-9 -14 1 0
+-8 -14 1 0
+-7 -14 1 0
+-6 -14 1 0
+-5 -14 1 0
+-4 -14 1 0
+-3 -14 1 0
+-2 -14 1 0
+-1 -14 1 0
+0 -14 1 0
+1 -14 4 0
+2 -14 1 0
+3 -14 1 0
+4 -14 1 0
+5 -14 1 0
+6 -14 1 0
+7 -14 1 0
+8 -14 1 0
+-9 -13 1 0
+-8 -13 1 0
+-7 -13 3 0
+-6 -13 1 0
+-5 -13 1 0
+-4 -13 1 0
+-3 -13 1 0
+-2 -13 1 0
+-1 -13 1 0
+0 -13 1 0
+1 -13 1 0
+2 -13 1 0
+3 -13 1 0
+4 -13 1 0
+5 -13 1 0
+6 -13 1 0
+7 -13 1 0
+8 -13 1 0
+-10 -12 1 0
+-9 -12 3 0
+-8 -12 1 0
+-7 -12 5 0
+-6 -12 1 0
+-5 -12 4 0
+-4 -12 1 0
+-3 -12 1 0
+-2 -12 1 0
+-1 -12 3 0
+0 -12 1 0
+1 -12 1 0
+2 -12 1 0
+3 -12 1 0
+4 -12 1 0
+5 -12 1 0
+6 -12 1 0
+7 -12 1 0
+8 -12 1 0
+9 -12 1 0
+-11 -11 1 0
+-10 -11 1 0
+-9 -11 1 0
+-8 -11 1 0
+-7 -11 1 0
+-6 -11 1 0
+-5 -11 1 0
+-4 -11 1 0
+-3 -11 1 0
+-2 -11 1 0
+-1 -11 1 0
+0 -11 1 0
+1 -11 1 0
+2 -11 1 0
+3 -11 1 0
+4 -11 1 0
+5 -11 1 0
+6 -11 1 0
+7 -11 1 0
+8 -11 1 0
+9 -11 1 0
+10 -11 1 0`;
+
+  const defectColors = {
+    1: 0x00ff00,
+    3: 0x0000ff,
+    4: 0xffff00,
+    5: 0xff00ff,
+    257: 0xff0000
+  };
+
+  const scene = new THREE.Scene();
+
+  const renderer = new THREE.WebGLRenderer({antialias: true});
+  renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  document.body.appendChild(renderer.domElement);
+
+  // 使用 Orthographic Camera（正交相机）
+  const width = window.innerWidth / 20;
+  const height = window.innerHeight / 20;
+  const camera = new THREE.OrthographicCamera(-width, width, height, -height, 1, 1000);
+  camera.position.z = 100;
+
+  // 添加每一个粒子（用立方体）
+  const lines = mapData.trim().split('\n');
+  lines.forEach(line => {
+    const [x, y, defectType] = line.split(' ').map(Number);
+    const color = defectColors[defectType];
+    if (!color) return;
+
+    const geometry = new THREE.BoxGeometry(0.9, 0.9, 0.1); // 小立方体，留点缝
+    const material = new THREE.MeshBasicMaterial({color});
+    const cube = new THREE.Mesh(geometry, material);
+    cube.position.set(x, y, 0);
+    scene.add(cube);
+  });
+
+  renderer.render(scene, camera);
+
+  // 响应式窗口调整
+  window.addEventListener('resize', () => {
+    const newWidth = window.innerWidth / 20;
+    const newHeight = window.innerHeight / 20;
+    camera.left = -newWidth;
+    camera.right = newWidth;
+    camera.top = newHeight;
+    camera.bottom = -newHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+</script>
+</body>
+</html>
