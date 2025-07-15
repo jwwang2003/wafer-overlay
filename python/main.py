@@ -1,14 +1,12 @@
 import os
-import re
 from tkinter import *
-from tkinter import messagebox, ttk
+from tkinter import messagebox
 
 import jpg
 import wlbi
 from PIL import Image
 
 wlbi_filepath = ""
-# 待补充没勾选wlbi时
 
 
 # 读取文件并获取头部信息和芯片地图数据
@@ -16,10 +14,8 @@ def read_file(file_path, file_type="default"):
     with open(file_path, "r") as file:
         lines = file.readlines()
 
-    # 找到地图数据的起始行
     start_line = 0
     for i, line in enumerate(lines):
-        # 根据文件类型识别起始行
         if ".*" in line or ".S" in line or "[MAP]:" in line:
             start_line = i
             break
@@ -31,7 +27,6 @@ def read_file(file_path, file_type="default"):
             key, value = line.strip().split(": ", 1)
             header[key.strip()] = value.strip()
 
-    # 提取芯片地图数据，过滤掉空行
     map_data = []
     for line in lines[start_line:]:
         stripped_line = line.strip()
@@ -45,191 +40,121 @@ def overlay_maps(maps, order, debug=False):
     if not maps:
         return []
 
-    # 按照用户指定的顺序排列地图
     ordered_maps = [maps[i] for i in order]
-
-    # 初始化结果矩阵，使用第一个地图的数据
     result = [list(row) for row in ordered_maps[0]]
+    debug_info = [] if debug else None
 
-    # 调试信息
-    if debug:
-        debug_info = []
-        debug_info.append("===== 叠图过程开始 =====")
-        debug_info.append(f"初始地图:")
-        for row in ordered_maps[0]:
-            debug_info.append(row)
-        debug_info.append("")
+    def get_start_position(line, is_first_line=False):
+        # 获取行的起始位置，第一行和其他行逻辑不同
+        if not line:
+            return 0
+        if is_first_line:
+            for j in range(len(line) - 1):
+                if line[j] == "." and (line[j + 1] == "S" or line[j + 1] == "*"):
+                    return j + 2
+        else:
+            found_dot = False
+            for j, char in enumerate(line):
+                if char == ".":
+                    found_dot = True
+                elif found_dot and char.isdigit():
+                    return j
+        return 0
 
-    # 按优先级覆盖
-    for map_idx, map_data in enumerate(ordered_maps[1:]):
-        if debug:
-            debug_info.append(f"应用地图 {map_idx+2}:")
-            for row in map_data:
-                debug_info.append(row)
-            debug_info.append("")
-            debug_info.append(f"叠图后结果:")
+    def should_replace(current, new):
+        # 判断是否应该用新字符替换当前字符
+        if new in (".", " "):
+            return False
+        if current.isdigit() and new.isdigit():
+            return int(new) > int(current)
+        if current in (".", " "):
+            return True
+        return not new.isdigit()
 
+    def process_line(result_line, map_line, i, is_first_line):
+        # 处理单行的叠加逻辑
         changes = 0
         change_details = []
+        result_start = get_start_position(result_line, is_first_line)
+        map_start = get_start_position(map_line, is_first_line)
+        offset = map_start - result_start
 
-        # 处理第一行：找到.S或.*后的第一个字符作为起始点
-        if map_data and result:
-            # 查找第一个地图中的.S或.*位置
-            first_map_start = 0
-            if len(result[0]) > 1:
-                for j in range(len(result[0]) - 1):
-                    if result[0][j] == "." and (
-                        result[0][j + 1] == "S" or result[0][j + 1] == "*"
-                    ):
-                        first_map_start = j + 2  # 从.S或.*后的第一个字符开始
-                        break
-
-            # 查找当前地图中的.S或.*位置
-            current_map_start = 0
-            if len(map_data[0]) > 1:
-                for j in range(len(map_data[0]) - 1):
-                    if map_data[0][j] == "." and (
-                        map_data[0][j + 1] == "S" or map_data[0][j + 1] == "*"
-                    ):
-                        current_map_start = j + 2
-                        break
-
-            # 计算偏移量
-            offset = current_map_start - first_map_start
-
-            # 处理第一行数据
-            if len(result[0]) > 0 and len(map_data[0]) > 0:
-                for j in range(len(map_data[0])):
-                    # 计算在结果矩阵中的对应位置
-                    result_pos = j - offset
-                    if result_pos < 0 or result_pos >= len(result[0]):
-                        continue
-
-                    current_char = result[0][result_pos]
-                    new_char = map_data[0][j]
-
-                    # 跳过空白字符
-                    if new_char == "." or new_char == " ":
-                        continue
-
-                    # 应用叠图逻辑
-                    if current_char.isdigit() and new_char.isdigit():
-                        if int(new_char) > int(current_char):
-                            result[0][result_pos] = new_char
-                            changes += 1
-                            if debug:
-                                change_details.append(
-                                    f"位置 (0,{result_pos}): {current_char} -> {new_char}"
-                                )
-                    elif current_char == "." or current_char == " ":
-                        result[0][result_pos] = new_char
-                        changes += 1
-                        if debug:
-                            change_details.append(
-                                f"位置 (0,{result_pos}): {current_char} -> {new_char}"
-                            )
-                    elif not new_char.isdigit():
-                        result[0][result_pos] = new_char
-                        changes += 1
-                        if debug:
-                            change_details.append(
-                                f"位置 (0,{result_pos}): {current_char} -> {new_char}"
-                            )
-
-        # 处理其余行：找到第一个.后的第一个数字作为起始点
-        for i in range(1, min(len(result), len(map_data))):
-            # 找到第一个地图中当前行的起始点
-            first_map_start = 0
-            found_dot = False
-            for j in range(len(result[i])):
-                if result[i][j] == ".":
-                    found_dot = True
-                elif found_dot and result[i][j].isdigit():
-                    first_map_start = j
-                    break
-
-            # 找到当前地图中当前行的起始点
-            current_map_start = 0
-            found_dot = False
-            for j in range(len(map_data[i])):
-                if map_data[i][j] == ".":
-                    found_dot = True
-                elif found_dot and map_data[i][j].isdigit():
-                    current_map_start = j
-                    break
-
-            # 计算偏移量
-            offset = current_map_start - first_map_start
-
-            # 处理当前行数据
-            for j in range(len(map_data[i])):
-                # 计算在结果矩阵中的对应位置
-                result_pos = j - offset
-                if result_pos < 0 or result_pos >= len(result[i]):
-                    continue
-
-                current_char = result[i][result_pos]
-                new_char = map_data[i][j]
-
-                # 跳过空白字符
-                if new_char == "." or new_char == " ":
-                    continue
-
-                # 应用叠图逻辑
-                if current_char.isdigit() and new_char.isdigit():
-                    if int(new_char) > int(current_char):
-                        result[i][result_pos] = new_char
-                        changes += 1
-                        if debug:
-                            change_details.append(
-                                f"位置 ({i},{result_pos}): {current_char} -> {new_char}"
-                            )
-                elif current_char == "." or current_char == " ":
-                    result[i][result_pos] = new_char
+        for j, new_char in enumerate(map_line):
+            result_pos = j - offset
+            if 0 <= result_pos < len(result_line):
+                current_char = result_line[result_pos]
+                if should_replace(current_char, new_char):
+                    result_line[result_pos] = new_char
                     changes += 1
                     if debug:
-                        change_details.append(
-                            f"位置 ({i},{result_pos}): {current_char} -> {new_char}"
+                        pos_str = (
+                            f"({i},{result_pos})"
+                            if not is_first_line
+                            else f"(0,{result_pos})"
                         )
-                elif not new_char.isdigit():
-                    result[i][result_pos] = new_char
-                    changes += 1
-                    if debug:
                         change_details.append(
-                            f"位置 ({i},{result_pos}): {current_char} -> {new_char}"
+                            f"位置 {pos_str}: {current_char} -> {new_char}"
                         )
+        return changes, change_details
 
+    # 调试信息初始化
+    if debug:
+        debug_info.append("===== 叠图过程开始 =====")
+        debug_info.append("初始地图:")
+        debug_info.extend(["".join(row) for row in result])
+        debug_info.append("")
+
+    # 按优先级覆盖地图
+    for map_idx, map_data in enumerate(ordered_maps[1:], start=2):
         if debug:
-            debug_info.append(f"本轮修改了 {changes} 个位置")
-            for row in result:
-                debug_info.append("".join(row))
+            debug_info.append(f"应用地图 {map_idx}:")
+            debug_info.extend(["".join(row) for row in map_data])
+            debug_info.append("")
+            debug_info.append("叠图后结果:")
+
+        total_changes = 0
+        all_change_details = []
+
+        # 处理第一行
+        if result and map_data:
+            changes, details = process_line(result[0], map_data[0], 0, True)
+            total_changes += changes
+            all_change_details.extend(details)
+
+        # 处理剩余行
+        for i in range(1, min(len(result), len(map_data))):
+            changes, details = process_line(result[i], map_data[i], i, False)
+            total_changes += changes
+            all_change_details.extend(details)
+
+        # 添加调试信息
+        if debug:
+            debug_info.append(f"本轮修改了 {total_changes} 个位置")
+            debug_info.extend(["".join(row) for row in result])
             debug_info.append("")
             debug_info.append("具体更改:")
-            debug_info.extend(change_details)
+            debug_info.extend(all_change_details)
             debug_info.append("")
 
+    # 返回结果
     if debug:
         debug_info.append("===== 叠图过程结束 =====")
         debug_info.append("最终地图:")
-        for row in result:
-            debug_info.append("".join(row))
+        debug_info.extend(["".join(row) for row in result])
         return ["".join(row) for row in result], debug_info
+    else:
+        return ["".join(row) for row in result]
 
-    return ["".join(row) for row in result]
 
-
-# 计算统计信息
 def calculate_stats(map_data):
-    """
-    计算总测试数、通过数、失败数和良率
-    """
+    # 计算总测试数、通过数、失败数和良率
     total_tested = 0
     total_pass = 0
     for row in map_data:
         for char in row:
             if char != "." and char != "S" and char != "*":
                 total_tested += 1
-                # 假设'1'表示通过，其他数字表示失败
+                # '1'和'A'表示通过，其他表示失败
                 if char == "1" or char == "A":
                     total_pass += 1
     total_fail = total_tested - total_pass
@@ -260,30 +185,9 @@ def generate_hex(map_data):
     return "\n".join(hex_lines + stats_lines)
 
 
-# 生成jpg格式
-def generate_jpg(map_data, file_name):
-    width = max(len(line) for line in map_data) if map_data else 0
-    height = len(map_data)
-    img = Image.new("RGB", (width, height), color="white")
-    for y, line in enumerate(map_data):
-        for x, char in enumerate(line):
-            if char != "." and char != " ":
-                # 根据字符不同显示不同颜色
-                if char.isdigit():
-                    color = (
-                        int(char) * 30,
-                        0,
-                        255 - int(char) * 30,
-                    )  # 数字越大，颜色越偏向红色
-                else:
-                    color = (0, 0, 0)  # 非数字字符显示为黑色
-                img.putpixel((x, y), color)
-    output_path = os.path.join(output_formats["jpg"], file_name.replace(".txt", ".jpg"))
-    img.save(output_path)
-
-
 # 处理叠图和输出
 def process_mapping():
+    wlbi_index = format_names.index("WLBI")
     selected_formats = []
     for i, var in enumerate(format_vars):
         if var.get() == 1:
@@ -297,9 +201,7 @@ def process_mapping():
     for output_folder in output_formats.values():
         if not os.path.exists(output_folder):
             os.makedirs(output_folder)
-
-    # 创建调试信息文件夹
-    debug_dir = "输出文件/debug"
+    debug_dir = output_formats["debug"]
     if not os.path.exists(debug_dir):
         os.makedirs(debug_dir)
 
@@ -312,33 +214,23 @@ def process_mapping():
 
         # 按照用户选择的顺序读取文件
         for format_name in selected_formats:
-            folder_path = input_formats[format_name]
-            if folder_path:
-                if format_name == "FAB":
-                    file_name = f"P0094B_B003332_{wafer_id}.txt"
-                    file_path = os.path.join(folder_path, file_name)
-                    file_type = "FAB"
-                elif format_name == "WLBI":
-                    file_name = (
-                        f"B003332-{wafer_id}_20250325_170454.WaferMap"  # 假设文件名格式
-                    )
-                    file_path = os.path.join(folder_path, file_name)
-                    wlbi_filepath = file_path
+            file_path = input_formats[format_name]
+            if file_path:
+
+                file_type = format_name
+                if format_name == "WLBI":
+
+                    # 检查对应索引的变量值是否为1（被勾选）
+                    if format_vars[wlbi_index].get() == 1:
+                        wlbi_filepath = file_path
+
                     map_data = wlbi.parse_wlbi_to_matrix(file_path)  # 调用函数获取列表
                     map_data = [
                         "".join(row) for row in map_data
                     ]  # 将二维列表转换为一维字符串列表
                     for row in map_data:
                         print(row)
-
-                else:
-                    file_name = (
-                        f"S1M032120B_B003332_{wafer_id}.txt"
-                        if format_name == "AOI"
-                        else f"S1M032120B_B003332_{wafer_id}_mapEx.txt"
-                    )
-                    file_path = os.path.join(folder_path, file_name)
-                    file_type = "default"
+                    # file_type = "default"
 
                 if os.path.exists(file_path):
                     if (format_name) != "WLBI":
@@ -358,7 +250,6 @@ def process_mapping():
                     print(f"警告: 文件 {file_path} 不存在")
 
         # 叠图
-
         if not maps:
             messagebox.showwarning("警告", f"晶圆 {wafer_id} 没有找到有效的叠图数据！")
             continue
@@ -374,7 +265,7 @@ def process_mapping():
         )
 
         # 保存调试信息
-        debug_file = os.path.join(debug_dir, f"S1M032120B_B003332_{wafer_id}_debug.txt")
+        debug_file = os.path.join(debug_dir, f"debug.txt")
         with open(debug_file, "w") as f:
             f.write(f"叠图顺序: {', '.join(format_names_list)}\n\n")
             f.write("\n".join(debug_info))
@@ -419,7 +310,6 @@ def process_mapping():
             file.write(hex_data)
 
         # 输出jpg格式
-        # generate_jpg(overlayed_map, f"{base_file_name}_overlayed.jpg")
         # jpg.generate_threejs(overlayed_map, f"{base_file_name}_overlayed.jpg")
         jpg.generate_color_image(
             overlayed_map, f"输出文件/jpg/{base_file_name}_overlayed_map.jpg"
@@ -446,21 +336,16 @@ def process_mapping():
             for row in overlayed_map:
                 file.write(f"{row}\n")
 
-        wlbi.print_inform_wafermap(overlayed_map, wlbi_filepath, base_file_name)
-        # generate_wafermap(overlayed_map, wlbi_filepath)
-        # for row in overlayed_map:
-        #     print(row)
+        if format_vars[wlbi_index].get() == 1:
+            wlbi.print_inform_wafermap(overlayed_map, wlbi_filepath, base_file_name)
 
 
-# 打开排序对话框
 def open_sort_dialog():
-    # 获取当前选中的格式
     selected = [i for i, var in enumerate(format_vars) if var.get() == 1]
     if not selected:
         messagebox.showwarning("警告", "请先选择至少一种格式！")
         return
 
-    # 创建排序对话框
     sort_window = Toplevel(root)
     sort_window.title("调整叠图顺序")
     sort_window.geometry("300x300")
@@ -471,7 +356,6 @@ def open_sort_dialog():
         listbox.insert(END, format_names[i])
     listbox.pack(pady=10, fill=BOTH, expand=True)
 
-    # 创建上移和下移按钮
     frame = Frame(sort_window)
     frame.pack(pady=10)
 
@@ -492,15 +376,10 @@ def open_sort_dialog():
             listbox.selection_set(selected_index[0] + 1)
 
     def save_order():
-        # 获取排序后的顺序
         sorted_formats = [listbox.get(i) for i in range(listbox.size())]
-        # 更新format_names的顺序
         global format_names
-        # 先保存未选中的格式
         unselected = [name for i, name in enumerate(format_names) if i not in selected]
-        # 重新组合格式列表
         format_names = sorted_formats + unselected
-        # 更新界面显示
         update_format_display()
         sort_window.destroy()
 
@@ -517,16 +396,17 @@ def update_format_display():
 
 # 定义每个输入格式的文件夹路径
 input_formats = {
-    "衬底": "",  # 这里没有衬底相关文件示例，可补充路径
-    "AOI": "叠图输入文件/AOI/S1M032120B_B003332",
-    "CP1": "叠图输入文件/CP1/S1M032120B_B003332_1_0",
-    "CP2": "叠图输入文件/CP2/S1M032120B_B003332_1_0",
-    "FAB": "叠图输入文件/FAB CP/B003332",
-    "WLBI": "叠图输入文件/WLBI/B003332",
+    "衬底": "",  # 补充路径
+    "AOI": "叠图输入文件/AOI/S1M032120B_B003332/S1M032120B_B003332_01.txt",
+    "CP1": "叠图输入文件/CP1/S1M032120B_B003332_1_0/S1M032120B_B003332_01_mapEx.txt",
+    "CP2": "叠图输入文件/CP2/S1M032120B_B003332_1_0/S1M032120B_B003332_01_mapEx.txt",
+    "FAB": "叠图输入文件/FAB CP/B003332/P0094B_B003332_01.txt",
+    "WLBI": "叠图输入文件/WLBI/B003332/B003332-01_20250325_170454.WaferMap",
 }
 
 # 定义输出格式的文件夹路径
 output_formats = {
+    "debug": "输出文件/debug",
     "mapEx": "输出文件/mapEx",
     "wafermap": "输出文件/wafermap",
     "HEX": "输出文件/HEX",
@@ -539,6 +419,8 @@ root.title("叠图处理工具")
 
 # 输入格式选择
 format_names = ["衬底", "AOI", "CP1", "CP2", "FAB", "WLBI"]
+# format_names = ["衬底", "CP1", "CP2", "WLBI", "CP3", "AOI"]
+
 format_vars = []
 checkbuttons = []
 for i, name in enumerate(format_names):
