@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>缺陷可视化</title>
+  <style>
+    body { margin: 0; overflow: hidden; }
+    #info { 
+      position: fixed; 
+      top: 10px; 
+      left: 10px; 
+      background: white; 
+      padding: 8px 12px; 
+      border: 1px solid #ccc; 
+      border-radius: 4px; 
+      font-family: Arial; 
+      font-size: 14px;
+      z-index: 100;
+    }
+    #legend {
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      background: white;
+      padding: 10px 15px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-family: Arial;
+      font-size: 13px;
+      z-index: 100;
+      max-height: 90vh;
+      overflow-y: auto; 
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      margin: 6px 0;
+    }
+    .color-block {
+      width: 14px;
+      height: 14px;
+      margin-right: 8px;
+      border: 1px solid #eee;
+    }
+    #file-controls {
+      position: fixed;
+      bottom: 20px;
+      left: 20px;
+      z-index: 100;
+      display: flex;
+      gap: 10px;
+    }
+    .file-btn {
+      padding: 8px 15px;
+      background: white;
+      border: 2px solid #666;
+      border-radius: 4px;
+      cursor: pointer;
+      font-family: Arial;
+      font-size: 14px;
+      transition: all 0.2s;
+    }
+    .file-btn.active {
+      background: #666;
+      color: white;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="info">加载中...</div>
+  <div id="legend"></div>
+  <div id="file-controls">
+    <button class="file-btn active" data-file="输出衬底/1-86107919CNF1/surface.json">Surface defect list</button>
+    <button class="file-btn" data-file="输出衬底/1-86107919CNF1/PL.json">PL defect list</button>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+  <script>
+    if (typeof THREE === 'undefined') {
+      document.getElementById('info').innerHTML = '错误：Three.js未加载';
+    } else {
+      let defectGroups = {
+        "输出衬底/1-86107919CNF1/surface.json": [],
+        "输出衬底/1-86107919CNF1/PL.json": []
+      };
+      let currentFile = "输出衬底/1-86107919CNF1/surface.json";
+      let scale;
+      let gridObjects = [];
+
+      // 1. 场景初始化
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0xf5f5f5);
+
+      const camera = new THREE.OrthographicCamera(
+        window.innerWidth / -2,
+        window.innerWidth / 2,
+        window.innerHeight / 2,
+        window.innerHeight / -2,
+        0.1, 1000
+      );
+      camera.position.z = 10;
+      camera.lookAt(0, 0, 0);
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      document.body.appendChild(renderer.domElement);
+
+      // 2. 坐标轴
+      function createXYAxes(length = 500) {
+        const xAxis = new THREE.Line(
+          new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-length, 0, 0), new THREE.Vector3(length, 0, 0)]),
+          new THREE.LineBasicMaterial({ color: 0xff0000, linewidth: 2 })
+        );
+        const yAxis = new THREE.Line(
+          new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, -length, 0), new THREE.Vector3(0, length, 0)]),
+          new THREE.LineBasicMaterial({ color: 0x00ff00, linewidth: 2 })
+        );
+        scene.add(xAxis);
+        scene.add(yAxis);
+      }
+      createXYAxes();
+
+      // 3. 颜色映射与图例
+      const classColorMap = [
+        { class: 'Unclassified', color: 0xff0000 },
+        { class: 'Particle', color: 0x000000 },
+        { class: 'Pit', color: 0x00ff00 },
+        { class: 'Bump', color: 0xadaf08 },
+        { class: 'MicroPipe', color: 0x0000ff },
+        { class: 'Line', color: 0x00ffff },
+        { class: 'carrot', color: 0xff92f8 },
+        { class: 'triangle', color: 0xc15dd7f6 },
+        { class: 'Downfall', color: 0x0000ff },
+        { class: 'scratch', color: 0xc15dd7f6 },
+        { class: 'PL_Black', color: 0xffa500 },
+        { class: 'PL_White', color: 0xff007b },
+        { class: 'PL_BPD', color: 0x38d1ff },
+        { class: 'PL_SF', color: 0x6d6df2 },
+        { class: 'PL_BSF', color: 0xff92f8 },
+      ];
+
+      function renderLegend() {
+        const legendDiv = document.getElementById('legend');
+        const uniqueClasses = [...new Set(classColorMap.map(item => item.class))];
+        uniqueClasses.forEach(className => {
+          const item = classColorMap.find(i => i.class === className);
+          if (item) {
+            const colorHex = item.color.toString(16).padStart(6, '0');
+            legendDiv.innerHTML += `
+              <div class="legend-item">
+                <div class="color-block" style="background-color: #${colorHex}"></div>
+                <span>${item.class}</span>
+              </div>
+            `;
+          }
+        });
+      }
+      renderLegend();
+
+      // 4. 加载文件数据
+      const infoDiv = document.getElementById('info');
+      const loader = new THREE.FileLoader();
+
+      function loadFile(filePath) {
+        return new Promise((resolve) => {
+          loader.load(filePath,
+            function(data) {
+              const defects = JSON.parse(data);
+              const defectObjects = [];
+              
+              defects.forEach(item => {
+                const x = parseFloat(item['X(mm)']) || 0;
+                const y = parseFloat(item['Y(mm)']) || 0;
+                const width = parseFloat(item['W(um)']) / 300;
+                const height = parseFloat(item['H(um)']) / 300;
+                const className = item['Class'] || 'Unknown';
+
+                const colorItem = classColorMap.find(c => c.class === className);
+                const color = colorItem?.color || 0xff00ff;
+
+                const geometry = new THREE.PlaneGeometry(width, height);
+                const material = new THREE.MeshBasicMaterial({
+                  color: color,
+                  side: THREE.DoubleSide,
+                  transparent: true,
+                  opacity: 0.8
+                });
+                const mesh = new THREE.Mesh(geometry, material);
+                mesh.position.set(x, y, 0);
+                defectObjects.push(mesh);
+              });
+
+              defectGroups[filePath] = {
+                objects: defectObjects,
+                rawData: defects
+              };
+              resolve(defects.length);
+            },
+            (xhr) => {
+              infoDiv.innerHTML = `加载 ${filePath}：${(xhr.loaded / xhr.total * 100).toFixed(0)}%`;
+            },
+            (error) => {
+              infoDiv.innerHTML = `加载 ${filePath} 失败：检查路径`;
+              resolve(0);
+            }
+          );
+        });
+      }
+
+      // 5. 创建网格(*方便观看，和真实结果不符)
+      function createGrid(minX, maxX, minY, maxY) {
+        gridObjects.forEach(obj => scene.remove(obj));
+        gridObjects = [];
+
+        const gridSize = 5; // 5mm网格
+        const maxGridX = Math.ceil(Math.max(Math.abs(minX), Math.abs(maxX)) / gridSize);
+        const maxGridY = Math.ceil(Math.max(Math.abs(minY), Math.abs(maxY)) / gridSize);
+        const offsetX = gridSize / 2;
+        const offsetY = gridSize / 2;
+        const gridMaterial = new THREE.MeshBasicMaterial({
+          color: 0xcccccc,
+          transparent: true,
+          opacity: 0.3,
+          side: THREE.DoubleSide
+        });
+
+        const borderMaterial = new THREE.LineBasicMaterial({
+          color: 0x000000,
+          linewidth: 1
+        });
+
+        for (let i = -maxGridX; i <= maxGridX; i++) {
+          for (let j = -maxGridY; j <= maxGridY; j++) {
+            const distance = Math.sqrt(Math.pow(i/maxGridX, 2) + Math.pow(j/maxGridY, 2));
+            if (distance <= 1.0) {
+              const geometry = new THREE.PlaneGeometry(gridSize, gridSize);
+              const mesh = new THREE.Mesh(geometry, gridMaterial);
+              mesh.position.set(i * gridSize + offsetX, j * gridSize + offsetY, -0.1);
+              scene.add(mesh);
+              gridObjects.push(mesh);
+
+              const edges = new THREE.EdgesGeometry(geometry);
+              const border = new THREE.LineSegments(edges, borderMaterial);
+              border.position.copy(mesh.position);
+              border.renderOrder = 1;
+              scene.add(border);
+              gridObjects.push(border);
+            }
+          }
+        }
+      }
+
+      // 6. 显示文件并生成对应网格
+      function showFile(filePath) {
+        scene.children = scene.children.filter(child => {
+          return!defectGroups[currentFile]?.objects?.includes(child);
+        });
+
+        defectGroups[filePath]?.objects?.forEach(obj => {
+          scene.add(obj);
+        });
+
+        const fileData = defectGroups[filePath];
+        if (fileData?.rawData?.length) {
+          let minX = Infinity, maxX = -Infinity;
+          let minY = Infinity, maxY = -Infinity;
+
+          fileData.rawData.forEach(item => {
+            const x = parseFloat(item['X(mm)']) || 0;
+            const y = parseFloat(item['Y(mm)']) || 0;
+            const width = parseFloat(item['W(um)']) / 300;
+            const height = parseFloat(item['H(um)']) / 300;
+
+            minX = Math.min(minX, x - width / 2);
+            maxX = Math.max(maxX, x + width / 2);
+            minY = Math.min(minY, y - height / 2);
+            maxY = Math.max(maxY, y + height / 2);
+          });
+
+          createGrid(minX, maxX, minY, maxY);
+
+          const dataWidth = maxX - minX;
+          const dataHeight = maxY - minY;
+          const centerX = (minX + maxX) / 2;
+          const centerY = (minY + maxY) / 2;
+          const margin = 1.3;
+          const scaleX = window.innerWidth / (dataWidth * margin);
+          const scaleY = window.innerHeight / (dataHeight * margin);
+          scale = Math.min(scaleX, scaleY);
+
+          camera.left = -window.innerWidth / 2 / scale;
+          camera.right = window.innerWidth / 2 / scale;
+          camera.top = window.innerHeight / 2 / scale;
+          camera.bottom = -window.innerHeight / 2 / scale;
+          camera.position.x = centerX;
+          camera.position.y = centerY;
+          camera.updateProjectionMatrix();
+
+          controls.target.set(centerX, centerY, 0);
+          controls.update();
+        }
+
+        currentFile = filePath;
+        document.querySelectorAll('.file-btn').forEach(btn => {
+          btn.classList.toggle('active', btn.dataset.file === filePath);
+        });
+      }
+
+      document.querySelectorAll('.file-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          showFile(btn.dataset.file);
+        });
+      });
+
+      // 7. 初始化加载
+      Promise.all([
+        loadFile("输出衬底/1-86107919CNF1/surface.json"),
+        loadFile("输出衬底/1-86107919CNF1/PL.json")
+      ]).then(([count1, count2]) => {
+        infoDiv.innerHTML = `
+          Surface：${count1}个缺陷 | PL：${count2}个缺陷<br>
+          操作：鼠标滚轮缩放 | 右键拖动平移
+        `;
+        showFile(currentFile);
+      });
+
+      // 8. 控制器和渲染
+      const controls = new THREE.OrbitControls(camera, renderer.domElement);
+      controls.enableRotate = false;
+      controls.enableZoom = true;
+      controls.enablePan = true;
+
+      function animate() {
+        requestAnimationFrame(animate);
+        renderer.render(scene, camera);
+      }
+      animate();
+
+      window.addEventListener('resize', () => {
+        if (scale) {
+          camera.left = -window.innerWidth / 2 / scale;
+          camera.right = window.innerWidth / 2 / scale;
+          camera.top = window.innerHeight / 2 / scale;
+          camera.bottom = -window.innerHeight / 2 / scale;
+          camera.updateProjectionMatrix();
+        }
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+    }
+  </script>
+</body>
+</html>
