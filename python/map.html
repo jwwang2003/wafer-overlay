@@ -91,6 +91,9 @@
       let currentFile = "输出衬底/1-86107919CNF1/surface.json";
       let scale;
       let gridObjects = [];
+      let gridInfo = [];
+      const overlapColor = 0xfa5959; // 重叠网格颜色
+      const gridSize = 5; 
 
       // 1. 场景初始化
       const scene = new THREE.Scene();
@@ -212,25 +215,26 @@
         });
       }
 
-      // 5. 创建网格(*方便观看，和真实结果不符)
-      function createGrid(minX, maxX, minY, maxY) {
+      // 5. 创建网格 + 重叠缺陷(*方便观看，和真实结果不符)
+      function createGrid(minX, maxX, minY, maxY, defects) {
         gridObjects.forEach(obj => scene.remove(obj));
         gridObjects = [];
+        gridInfo = [];
 
-        const gridSize = 5; // 5mm网格
         const maxGridX = Math.ceil(Math.max(Math.abs(minX), Math.abs(maxX)) / gridSize);
         const maxGridY = Math.ceil(Math.max(Math.abs(minY), Math.abs(maxY)) / gridSize);
         const offsetX = gridSize / 2;
         const offsetY = gridSize / 2;
+        const baseGridColor = 0x8cefa1; // 基础网格颜色
+        
         const gridMaterial = new THREE.MeshBasicMaterial({
-          color: 0xcccccc,
-          transparent: true,
+          color: baseGridColor,
           opacity: 0.3,
           side: THREE.DoubleSide
         });
 
         const borderMaterial = new THREE.LineBasicMaterial({
-          color: 0x000000,
+          color: 0xffffff,
           linewidth: 1
         });
 
@@ -238,11 +242,51 @@
           for (let j = -maxGridY; j <= maxGridY; j++) {
             const distance = Math.sqrt(Math.pow(i/maxGridX, 2) + Math.pow(j/maxGridY, 2));
             if (distance <= 1.0) {
+              // 计算网格的位置和边界
+              const gridX = i * gridSize + offsetX;
+              const gridY = j * gridSize + offsetY;
+              const gridMinX = gridX - gridSize / 2;
+              const gridMaxX = gridX + gridSize / 2;
+              const gridMinY = gridY - gridSize / 2;
+              const gridMaxY = gridY + gridSize / 2;
+              
+              // 检查该网格是否与任何缺陷重叠
+              let hasOverlap = false;
+              if (defects) {
+                hasOverlap = defects.some(defect => {
+                  const x = parseFloat(defect['X(mm)']) || 0;
+                  const y = parseFloat(defect['Y(mm)']) || 0;
+                  // 检查缺陷坐标是否在当前网格范围内
+                  return x >= gridMinX && x <= gridMaxX && y >= gridMinY && y <= gridMaxY;
+                });
+              }
+              
+              const material = hasOverlap 
+                ? new THREE.MeshBasicMaterial({
+                    color: overlapColor,
+                    transparent: true,
+                    opacity: 0.5,
+                    side: THREE.DoubleSide
+                  })
+                : gridMaterial;
+              
               const geometry = new THREE.PlaneGeometry(gridSize, gridSize);
-              const mesh = new THREE.Mesh(geometry, gridMaterial);
-              mesh.position.set(i * gridSize + offsetX, j * gridSize + offsetY, -0.1);
+              const mesh = new THREE.Mesh(geometry, material);
+              mesh.position.set(gridX, gridY, -0.1);
               scene.add(mesh);
               gridObjects.push(mesh);
+              
+              gridInfo.push({
+                mesh,
+                x: gridX,
+                y: gridY,
+                minX: gridMinX,
+                maxX: gridMaxX,
+                minY: gridMinY,
+                maxY: gridMaxY,
+                hasOverlap,
+                originalColor: baseGridColor
+              });
 
               const edges = new THREE.EdgesGeometry(geometry);
               const border = new THREE.LineSegments(edges, borderMaterial);
@@ -282,7 +326,7 @@
             maxY = Math.max(maxY, y + height / 2);
           });
 
-          createGrid(minX, maxX, minY, maxY);
+          createGrid(minX, maxX, minY, maxY, fileData.rawData);
 
           const dataWidth = maxX - minX;
           const dataHeight = maxY - minY;
