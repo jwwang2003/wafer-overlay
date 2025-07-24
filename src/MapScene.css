@@ -1,0 +1,64 @@
+/* MapScene.css */
+body {
+  margin: 0;
+  overflow: hidden;
+}
+#info {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  background: white;
+  padding: 8px 12px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-family: Arial;
+  font-size: 14px;
+  z-index: 100;
+}
+#legend {
+  position: fixed;
+  top: 10px;
+  right: 10px;
+  background: white;
+  padding: 10px 15px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-family: Arial;
+  font-size: 13px;
+  z-index: 100;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+.legend-item {
+  display: flex;
+  align-items: center;
+  margin: 6px 0;
+}
+.color-block {
+  width: 14px;
+  height: 14px;
+  margin-right: 8px;
+  border: 1px solid #eee;
+}
+#file-controls {
+  position: fixed;
+  bottom: 20px;
+  left: 20px;
+  z-index: 100;
+  display: flex;
+  gap: 10px;
+}
+.file-btn {
+  padding: 8px 15px;
+  background: white;
+  border: 2px solid #666;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: Arial;
+  font-size: 14px;
+  transition: all 0.2s;
+}
+.file-btn.active {
+  background: #666;
+  color: white;
+}

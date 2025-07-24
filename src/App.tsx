@@ -14,7 +14,7 @@
 
 //   return (
 //     <main className="container">
-//       <h1>Welcome to Tauri + React</h1>
+//       <h1>Welcome to </h1>
 
 //       <div className="row">
 //         <a href="https://vitejs.dev" target="_blank">
@@ -53,12 +53,13 @@
 // In App.tsx or App.jsx:
 // import React from 'react';
 
-import WaferScene from './WaferScene.tsx';
+// import WaferScene from "./WaferScene.tsx";
+import MapScene from './MapScene';
 
 function App() {
   return (
     <div style={{ width: 800, height: 800 }}>
-      <WaferScene />
+      <MapScene />
     </div>
   );
 }
