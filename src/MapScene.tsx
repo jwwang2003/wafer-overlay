@@ -92,7 +92,7 @@ const MapScene = () => {
     { class: "triangle", color: 0xc15dd7f6 },
     { class: "Downfall", color: 0x0000ff },
     { class: "scratch", color: 0xc15dd7f6 },
-    { class: "PL_Black", color: 0xffa500 },
+    { class: "PL_Black", color: 0xff9a16 },
     { class: "PL_White", color: 0xff007b },
     { class: "PL_BPD", color: 0x38d1ff },
     { class: "PL_SF", color: 0x6d6df2 },
@@ -466,7 +466,7 @@ const MapScene = () => {
     gridObjects.current = [];
     coordinateLabels.current = [];
 
-    const overlapColor = 0xfa5959;
+    const overlapColor = 0xff7878;
     const baseGridColor = 0x8cefa1;
 
     const maxGridX = Math.ceil(

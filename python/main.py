@@ -9,7 +9,6 @@ from PIL import Image
 wlbi_filepath = ""
 
 
-# 读取文件并获取头部信息和芯片地图数据
 def read_file(file_path, file_type="default"):
     with open(file_path, "r") as file:
         lines = file.readlines()
@@ -20,7 +19,6 @@ def read_file(file_path, file_type="default"):
             start_line = i
             break
 
-    # 提取头部信息
     header = {}
     for line in lines[:start_line]:
         if ": " in line:
@@ -36,16 +34,39 @@ def read_file(file_path, file_type="default"):
     return header, map_data
 
 
-def overlay_maps(maps, order, debug=False):
+def overlay_maps(maps, format_names_list, debug=False):
     if not maps:
         return []
 
-    ordered_maps = [maps[i] for i in order]
-    result = [list(row) for row in ordered_maps[0]]
+    priority = {
+        "CP2": 5,
+        "WLBI": 4,
+        "CP1": 3,
+        "CP3": 2,
+        "AOI": 1,
+    }  # CP2优先级最高，AOI最低
+
+    indexed_maps = []
+    for name, map_data in zip(format_names_list, maps):
+        if name in priority:
+            indexed_maps.append((name, map_data))
+        else:
+            if debug:
+                print(f"警告: 无效的站点名称 '{name}'，已跳过")
+
+    if not indexed_maps:
+        if debug:
+            print("警告: 没有有效的地图数据可用于叠图")
+        return []
+
+    indexed_maps.sort(key=lambda x: priority[x[0]])
+    sorted_names, sorted_maps = zip(*indexed_maps)
+
+    # 初始化结果为优先级最低的地图
+    result = [list(row) for row in sorted_maps[0]]
     debug_info = [] if debug else None
 
     def get_start_position(line, is_first_line=False):
-        # 获取行的起始位置，第一行和其他行逻辑不同
         if not line:
             return 0
         if is_first_line:
@@ -62,14 +83,12 @@ def overlay_maps(maps, order, debug=False):
         return 0
 
     def should_replace(current, new):
-        # 判断是否应该用新字符替换当前字符
+        # 只有当新值不是1时才替换
+        if new == "1":
+            return False
         if new in (".", " "):
             return False
-        if current.isdigit() and new.isdigit():
-            return int(new) > int(current)
-        if current in (".", " "):
-            return True
-        return not new.isdigit()
+        return True
 
     def process_line(result_line, map_line, i, is_first_line):
         # 处理单行的叠加逻辑
@@ -97,17 +116,21 @@ def overlay_maps(maps, order, debug=False):
                         )
         return changes, change_details
 
-    # 调试信息初始化
     if debug:
         debug_info.append("===== 叠图过程开始 =====")
-        debug_info.append("初始地图:")
+        debug_info.append(f"叠图顺序（按优先级从低到高）: {', '.join(sorted_names)}")
+        debug_info.append("初始地图（优先级最低）:")
         debug_info.extend(["".join(row) for row in result])
         debug_info.append("")
 
-    # 按优先级覆盖地图
-    for map_idx, map_data in enumerate(ordered_maps[1:], start=2):
+    # 按优先级从低到高覆盖地图（跳过第一个，已作为初始地图）
+    for map_idx, (map_name, map_data) in enumerate(
+        zip(sorted_names[1:], sorted_maps[1:]), start=2
+    ):
         if debug:
-            debug_info.append(f"应用地图 {map_idx}:")
+            debug_info.append(
+                f"应用地图 {map_idx} ({map_name}，优先级 {priority[map_name]}):"
+            )
             debug_info.extend(["".join(row) for row in map_data])
             debug_info.append("")
             debug_info.append("叠图后结果:")
@@ -212,7 +235,6 @@ def process_mapping():
         selected_indices = []
         format_names_list = []
 
-        # 按照用户选择的顺序读取文件
         for format_name in selected_formats:
             file_path = input_formats[format_name]
             if file_path:
@@ -224,7 +246,7 @@ def process_mapping():
                     if format_vars[wlbi_index].get() == 1:
                         wlbi_filepath = file_path
 
-                    map_data = wlbi.parse_wlbi_to_matrix(file_path)  # 调用函数获取列表
+                    map_data = wlbi.parse_wlbi_to_matrix(file_path)
                     map_data = [
                         "".join(row) for row in map_data
                     ]  # 将二维列表转换为一维字符串列表
@@ -249,15 +271,11 @@ def process_mapping():
                 else:
                     print(f"警告: 文件 {file_path} 不存在")
 
-        # 叠图
         if not maps:
             messagebox.showwarning("警告", f"晶圆 {wafer_id} 没有找到有效的叠图数据！")
             continue
 
-        # 使用用户选择的顺序进行叠图，并获取调试信息
-        overlayed_map, debug_info = overlay_maps(
-            maps, list(range(len(maps))), debug=True
-        )
+        overlayed_map, debug_info = overlay_maps(maps, format_names_list, debug=True)
 
         # 计算统计信息
         total_tested, total_pass, total_fail, yield_percentage = calculate_stats(
@@ -277,7 +295,6 @@ def process_mapping():
 
         print(f"调试信息已保存到: {debug_file}")
 
-        # 输出到不同格式
         base_file_name = f"S1M032120B_B003332_{wafer_id}"
 
         # 输出mapEx格式
@@ -285,7 +302,6 @@ def process_mapping():
             output_formats["mapEx"], f"{base_file_name}_overlayed.mapEx"
         )
         with open(output_mapEx_path, "w") as file:
-            # 写入第一个文件的头部信息
             for key, value in headers[0].items():
                 if key == "Total Tested":
                     value = str(total_tested)
@@ -296,7 +312,7 @@ def process_mapping():
                 elif key == "Yield":
                     value = f"{yield_percentage:.2f}%"
                 file.write(f"{key}: {value}\n")
-            file.write("\n")  # 空行分隔头部和地图数据
+            file.write("\n")
             # 写入地图数据
             for row in overlayed_map:
                 file.write(f"{row}\n")
@@ -320,7 +336,6 @@ def process_mapping():
             output_formats["wafermap"], f"{base_file_name}_overlayed.wafermap"
         )
         with open(output_wafermap_path, "w") as file:
-            # 写入第一个文件的头部信息
             for key, value in headers[0].items():
                 if key == "Total Tested":
                     value = str(total_tested)
@@ -331,8 +346,7 @@ def process_mapping():
                 elif key == "Yield":
                     value = f"{yield_percentage:.2f}%"
                 file.write(f"{key}: {value}\n")
-            file.write("\n")  # 空行分隔头部和地图数据
-            # 写入地图数据
+            file.write("\n")
             for row in overlayed_map:
                 file.write(f"{row}\n")
 
@@ -350,7 +364,6 @@ def open_sort_dialog():
     sort_window.title("调整叠图顺序")
     sort_window.geometry("300x300")
 
-    # 创建列表框显示选中的格式
     listbox = Listbox(sort_window, selectmode=SINGLE, height=len(selected))
     for i in selected:
         listbox.insert(END, format_names[i])
@@ -388,23 +401,20 @@ def open_sort_dialog():
     Button(sort_window, text="保存顺序", command=save_order).pack(pady=10)
 
 
-# 更新格式显示
 def update_format_display():
     for i, name in enumerate(format_names):
         checkbuttons[i].config(text=name)
 
 
-# 定义每个输入格式的文件夹路径
 input_formats = {
     "衬底": "",  # 补充路径
     "AOI": "叠图输入文件/AOI/S1M032120B_B003332/S1M032120B_B003332_01.txt",
     "CP1": "叠图输入文件/CP1/S1M032120B_B003332_1_0/S1M032120B_B003332_01_mapEx.txt",
     "CP2": "叠图输入文件/CP2/S1M032120B_B003332_1_0/S1M032120B_B003332_01_mapEx.txt",
-    "FAB": "叠图输入文件/FAB CP/B003332/P0094B_B003332_01.txt",
+    "CP3": "叠图输入文件/FAB CP/B003332/P0094B_B003332_01.txt",
     "WLBI": "叠图输入文件/WLBI/B003332/B003332-01_20250325_170454.WaferMap",
 }
 
-# 定义输出格式的文件夹路径
 output_formats = {
     "debug": "输出文件/debug",
     "mapEx": "输出文件/mapEx",
@@ -413,32 +423,77 @@ output_formats = {
     "jpg": "输出文件/jpg",
 }
 
-# 创建主窗口
 root = Tk()
 root.title("叠图处理工具")
+root.geometry("400x400")
 
-# 输入格式选择
-format_names = ["衬底", "AOI", "CP1", "CP2", "FAB", "WLBI"]
-# format_names = ["衬底", "CP1", "CP2", "WLBI", "CP3", "AOI"]
+format_names = ["衬底", "CP1", "CP2", "WLBI", "CP3", "AOI"]
 
 format_vars = []
 checkbuttons = []
+
+# 设置字体样式
+default_font = ("Microsoft YaHei", 12)
+button_font = ("Microsoft YaHei", 13, "bold")
+
+# 配置界面颜色
+bg_color = "#f0f0f0"
+button_bg = "#213552"
+button_fg = "#383838"
+checkbutton_bg = "#f0f0f0"
+
+root.configure(bg=bg_color)
+options_frame = LabelFrame(root, text="选择处理格式", font=default_font, bg=bg_color)
+options_frame.grid(row=1, column=0, columnspan=2, padx=20, pady=10, sticky="nsew")
+
 for i, name in enumerate(format_names):
     var = IntVar()
+    var.set(1)  # 设置默认勾选状态
     format_vars.append(var)
-    cb = Checkbutton(root, text=name, variable=var)
-    cb.grid(row=i, column=0, sticky=W)
+    cb = Checkbutton(
+        options_frame,
+        text=name,
+        variable=var,
+        font=default_font,
+        bg=checkbutton_bg,
+        selectcolor="#d0e0f5",
+        padx=10,
+        pady=5,
+    )
+    cb.grid(row=i, column=0, sticky=W, padx=10, pady=2)
     checkbuttons.append(cb)
 
-# 排序按钮
-Button(root, text="调整叠图顺序", command=open_sort_dialog).grid(
-    row=len(format_names), column=0, pady=5, sticky=W
+button_frame = Frame(root, bg=bg_color)
+button_frame.grid(
+    row=len(format_names) + 2, column=0, columnspan=2, pady=15, sticky="nsew"
 )
 
-# 处理按钮
-Button(root, text="开始处理", command=process_mapping).grid(
-    row=len(format_names) + 1, column=0, pady=10
+sort_button = Button(
+    button_frame,
+    text="调整叠图顺序",
+    command=open_sort_dialog,
+    font=button_font,
+    bg=button_bg,
+    fg=button_fg,
+    padx=30,
+    pady=15,
+    relief=RAISED,
+    bd=4,
 )
+sort_button.pack(side=LEFT, padx=10)
 
-# 运行主循环
+process_button = Button(
+    button_frame,
+    text="开始处理",
+    command=process_mapping,
+    font=button_font,
+    bg="#2ecc71",
+    fg=button_fg,
+    padx=30,
+    pady=15,
+    relief=RAISED,
+    bd=4,
+)
+process_button.pack(side=LEFT, padx=10)
+
 root.mainloop()
