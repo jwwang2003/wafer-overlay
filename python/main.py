@@ -7,6 +7,7 @@ import wlbi
 from PIL import Image
 
 wlbi_filepath = ""
+cp1_header = {}
 
 
 def read_file(file_path, file_type="default"):
@@ -83,7 +84,7 @@ def overlay_maps(maps, format_names_list, debug=False):
         return 0
 
     def should_replace(current, new):
-        # 只有当新值不是1时才替换
+        # 只有当新值不是1时才覆盖
         if new == "1":
             return False
         if new in (".", " "):
@@ -170,7 +171,6 @@ def overlay_maps(maps, format_names_list, debug=False):
 
 
 def calculate_stats(map_data):
-    # 计算总测试数、通过数、失败数和良率
     total_tested = 0
     total_pass = 0
     for row in map_data:
@@ -186,8 +186,14 @@ def calculate_stats(map_data):
 
 
 # 生成HEX格式
-def generate_hex(map_data):
+def generate_hex(map_data, header=None):
     hex_lines = []
+    if header:
+        if isinstance(header, str):
+            header = header.split("\n")
+        for line in header:
+            hex_lines.append(line.strip())
+        hex_lines.append("")
     digit_count = {}
     for row in map_data:
         processed_row = []
@@ -210,6 +216,7 @@ def generate_hex(map_data):
 
 # 处理叠图和输出
 def process_mapping():
+    global cp1_header
     wlbi_index = format_names.index("WLBI")
     selected_formats = []
     for i, var in enumerate(format_vars):
@@ -220,7 +227,6 @@ def process_mapping():
         messagebox.showwarning("警告", "请至少选择一种输入格式！")
         return
 
-    # 创建输出文件夹
     for output_folder in output_formats.values():
         if not os.path.exists(output_folder):
             os.makedirs(output_folder)
@@ -228,12 +234,12 @@ def process_mapping():
     if not os.path.exists(debug_dir):
         os.makedirs(debug_dir)
 
-    # 处理每个晶圆
     for wafer_id in ["01"]:
         headers = []
         maps = []
         selected_indices = []
         format_names_list = []
+        cp1_header = {}
 
         for format_name in selected_formats:
             file_path = input_formats[format_name]
@@ -252,11 +258,13 @@ def process_mapping():
                     ]  # 将二维列表转换为一维字符串列表
                     for row in map_data:
                         print(row)
-                    # file_type = "default"
 
                 if os.path.exists(file_path):
                     if (format_name) != "WLBI":
                         header, map_data = read_file(file_path, file_type)
+                        # 如果是CP1文件，保存其header
+                        if format_name == "CP1":
+                            cp1_header = header.copy()
                     if map_data:
                         headers.append(header)
                         maps.append(map_data)
@@ -297,12 +305,12 @@ def process_mapping():
 
         base_file_name = f"S1M032120B_B003332_{wafer_id}"
 
-        # 输出mapEx格式
         output_mapEx_path = os.path.join(
             output_formats["mapEx"], f"{base_file_name}_overlayed.mapEx"
         )
         with open(output_mapEx_path, "w") as file:
-            for key, value in headers[0].items():
+            use_header = cp1_header if cp1_header else headers[0]
+            for key, value in use_header.items():
                 if key == "Total Tested":
                     value = str(total_tested)
                 elif key == "Total Pass":
@@ -317,8 +325,46 @@ def process_mapping():
             for row in overlayed_map:
                 file.write(f"{row}\n")
 
+                
+
+        if cp1_header:
+            device_name = cp1_header.get("Device Name", "Unknown")
+            lot_no = cp1_header.get("Lot No.", "Unknown")
+            wafer_id = cp1_header.get("Wafer ID", "Unknown")
+            xdies = cp1_header.get("Dice SizeX", "Unknown")
+            ydies = cp1_header.get("Dice SizeY", "Unknown")
+            rowct = cp1_header.get("Map Row", "Unknown")
+            colct = cp1_header.get("Map Column", "Unknown")
+
+            try:
+                xdies_value = float(xdies)
+                formatted_xdies = f"{xdies_value / 1000:.5f}"
+            except (ValueError, TypeError):
+                formatted_xdies = xdies
+
+            try:
+                ydies_value = float(ydies)
+                formatted_ydies = f"{ydies_value / 1000:.5f}"
+            except (ValueError, TypeError):
+                formatted_ydies = ydies
+
+            hex_header = [
+                f"DEVICE:{device_name}",
+                f"LOT:{lot_no}",
+                f"WAFER:{wafer_id}",
+                "FNLOC:0",
+                f"ROWCT:{rowct}",
+                f"COLCT:{colct}",
+                "BCEQU:01",
+                "REFPX:1",
+                "REFPY:28",
+                "DUTMS:MM",
+                f"XDIES:{formatted_xdies}",
+                f"YDIES:{formatted_ydies}"
+            ]
+
         # 输出HEX格式
-        hex_data = generate_hex(overlayed_map)
+        hex_data = generate_hex(overlayed_map, header=hex_header)
         output_hex_path = os.path.join(
             output_formats["HEX"], f"{base_file_name}_overlayed.hex"
         )
@@ -327,16 +373,17 @@ def process_mapping():
 
         # 输出jpg格式
         # jpg.generate_threejs(overlayed_map, f"{base_file_name}_overlayed.jpg")
-        jpg.generate_color_image(
-            overlayed_map, f"输出文件/jpg/{base_file_name}_overlayed_map.jpg"
-        )
+        # jpg.generate_color_image(
+        #     overlayed_map, f"输出文件/jpg/{base_file_name}_overlayed_map.jpg"
+        # )
 
         # 输出wafermap格式
         output_wafermap_path = os.path.join(
             output_formats["wafermap"], f"{base_file_name}_overlayed.wafermap"
         )
         with open(output_wafermap_path, "w") as file:
-            for key, value in headers[0].items():
+            use_header = cp1_header if cp1_header else headers[0]
+            for key, value in use_header.items():
                 if key == "Total Tested":
                     value = str(total_tested)
                 elif key == "Total Pass":
@@ -408,11 +455,11 @@ def update_format_display():
 
 input_formats = {
     "衬底": "",  # 补充路径
-    "AOI": "叠图输入文件/AOI/S1M032120B_B003332/S1M032120B_B003332_01.txt",
-    "CP1": "叠图输入文件/CP1/S1M032120B_B003332_1_0/S1M032120B_B003332_01_mapEx.txt",
-    "CP2": "叠图输入文件/CP2/S1M032120B_B003332_1_0/S1M032120B_B003332_01_mapEx.txt",
-    "CP3": "叠图输入文件/FAB CP/B003332/P0094B_B003332_01.txt",
-    "WLBI": "叠图输入文件/WLBI/B003332/B003332-01_20250325_170454.WaferMap",
+    "AOI": "叠图输入文件/AOI-01/S1M040120B_B003990/S1M040120B_B003990_02_20250721095040.txt",
+    "CP1": "叠图输入文件/CP-prober-01/S1M040120B_B003990_1_0/S1M040120B_B003990_02/S1M040120B_B003990_02_mapEx.txt",
+    "CP2": "叠图输入文件/CP-prober-02/S1M040120B_B003990_2_0/S1M040120B_B003990_02/S1M040120B_B003990_02_mapEx.txt",
+    "CP3": "叠图输入文件/FAB CP/BinMap/B003990/P0097B_B003990_02.txt",
+    "WLBI": "叠图输入文件/WLBI-02/S1M040120B_B003990_1_0/WaferMap/B003990-02_20250325_165831.WaferMap",
 }
 
 output_formats = {
@@ -420,7 +467,7 @@ output_formats = {
     "mapEx": "输出文件/mapEx",
     "wafermap": "输出文件/wafermap",
     "HEX": "输出文件/HEX",
-    "jpg": "输出文件/jpg",
+    # "jpg": "输出文件/jpg",
 }
 
 root = Tk()
